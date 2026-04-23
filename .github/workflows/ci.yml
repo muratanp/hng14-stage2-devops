@@ -173,23 +173,23 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: |
           docker tag localhost:5000/api:${{ github.sha }} \
-            ghcr.io/${{ github.repository }}/api:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/api:${{ github.sha }}
           docker tag localhost:5000/api:${{ github.sha }} \
-            ghcr.io/${{ github.repository }}/api:latest
+            ghcr.io/${{ github.repository_owner }}/api:latest
           docker tag localhost:5000/worker:${{ github.sha }} \
-            ghcr.io/${{ github.repository }}/worker:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/worker:${{ github.sha }}
           docker tag localhost:5000/worker:${{ github.sha }} \
-            ghcr.io/${{ github.repository }}/worker:latest
+            ghcr.io/${{ github.repository_owner }}/worker:latest
           docker tag localhost:5000/frontend:${{ github.sha }} \
-            ghcr.io/${{ github.repository }}/frontend:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/frontend:${{ github.sha }}
           docker tag localhost:5000/frontend:${{ github.sha }} \
-            ghcr.io/${{ github.repository }}/frontend:latest
-          docker push ghcr.io/${{ github.repository }}/api:${{ github.sha }}
-          docker push ghcr.io/${{ github.repository }}/api:latest
-          docker push ghcr.io/${{ github.repository }}/worker:${{ github.sha }}
-          docker push ghcr.io/${{ github.repository }}/worker:latest
-          docker push ghcr.io/${{ github.repository }}/frontend:${{ github.sha }}
-          docker push ghcr.io/${{ github.repository }}/frontend:latest
+            ghcr.io/${{ github.repository_owner }}/frontend:latest
+          docker push ghcr.io/${{ github.repository_owner }}/api:${{ github.sha }}
+          docker push ghcr.io/${{ github.repository_owner }}/api:latest
+          docker push ghcr.io/${{ github.repository_owner }}/worker:${{ github.sha }}
+          docker push ghcr.io/${{ github.repository_owner }}/worker:latest
+          docker push ghcr.io/${{ github.repository_owner }}/frontend:${{ github.sha }}
+          docker push ghcr.io/${{ github.repository_owner }}/frontend:latest
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STAGE 4 — SECURITY SCAN
@@ -337,6 +337,11 @@ jobs:
     needs: integration
     if: github.ref == 'refs/heads/main'
     environment: production
+
+    permissions:
+      contents: read
+      packages: write
+
     steps:
       - uses: actions/checkout@v4
 
@@ -350,7 +355,7 @@ jobs:
       - name: Rolling update on server
         env:
           SHA: ${{ github.sha }}
-          REPO: ${{ github.repository }}
+          REPO: ${{ github.repository_owner }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_HOST: ${{ secrets.SSH_HOST }}
