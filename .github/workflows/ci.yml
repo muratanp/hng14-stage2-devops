@@ -344,7 +344,7 @@ jobs:
             echo "Attempt $i failed, retrying..."
             sleep 3
           done
-          
+
           echo "Response: $RESPONSE"
           JOB_ID=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['job_id'])")
           echo "job_id=$JOB_ID" >> "$GITHUB_OUTPUT"
@@ -378,68 +378,32 @@ jobs:
     runs-on: ubuntu-latest
     needs: integration
     if: github.ref == 'refs/heads/main'
-    environment: production
-
-    permissions:
-      contents: read
-      packages: write
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up SSH
+      - name: Pull images from registry
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
+          docker pull ghcr.io/${{ github.repository_owner }}/api:${{ github.sha }}
+          docker pull ghcr.io/${{ github.repository_owner }}/worker:${{ github.sha }}
+          docker pull ghcr.io/${{ github.repository_owner }}/frontend:${{ github.sha }}
 
-      - name: Rolling update on server
-        env:
-          SHA: ${{ github.sha }}
-          REPO: ${{ github.repository_owner }}
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
-          SSH_USER: ${{ secrets.SSH_USER }}
-          SSH_HOST: ${{ secrets.SSH_HOST }}
+      - name: Start new stack (simulated deploy)
         run: |
-          ssh "$SSH_USER@$SSH_HOST" bash -s << 'REMOTE'
-            set -euo pipefail
-            cd "$DEPLOY_PATH"
+          export TAG=${{ github.sha }}
+          export REGISTRY=ghcr.io/${{ github.repository_owner }}
+          docker compose up -d
+      
+      - name: Health check (60s rollback simulation)
+        run: |
+          for i in $(seq 1 12); do
+            if curl -sf http://localhost:3000/health; then
+              echo "Healthy deployment"
+              exit 0
+            fi
+            sleep 5
+          done
 
-            NEW_TAG="${SHA}"
-            REGISTRY="ghcr.io/${REPO}"
-
-            echo "==> Pulling new images (tag: $NEW_TAG)..."
-            docker pull "${REGISTRY}/api:${NEW_TAG}"
-            docker pull "${REGISTRY}/worker:${NEW_TAG}"
-            docker pull "${REGISTRY}/frontend:${NEW_TAG}"
-
-            echo "==> Starting new containers alongside old ones..."
-            TAG="$NEW_TAG" REGISTRY="$REGISTRY" docker compose up -d --no-deps --scale api=2 api     || true
-            TAG="$NEW_TAG" REGISTRY="$REGISTRY" docker compose up -d --no-deps --scale worker=2 worker || true
-            TAG="$NEW_TAG" REGISTRY="$REGISTRY" docker compose up -d --no-deps --scale frontend=2 frontend || true
-
-            echo "==> Waiting for new api container to pass health check (max 60s)..."
-            TIMEOUT=60
-            ELAPSED=0
-            NEW_CONTAINER=$(docker compose ps -q api | tail -1)
-            until [ "$(docker inspect --format='{{.State.Health.Status}}' "$NEW_CONTAINER")" = "healthy" ]; do
-              if [ "$ELAPSED" -ge "$TIMEOUT" ]; then
-                echo "ERROR: New container did not become healthy within ${TIMEOUT}s. Aborting, leaving old container running."
-                docker stop "$NEW_CONTAINER" && docker rm "$NEW_CONTAINER"
-                exit 1
-              fi
-              sleep 5
-              ELAPSED=$((ELAPSED + 5))
-              echo "  ...${ELAPSED}s elapsed"
-            done
-
-            echo "==> New containers healthy. Removing old containers..."
-            TAG="$NEW_TAG" REGISTRY="$REGISTRY" \
-              docker compose up -d --no-deps --remove-orphans api worker frontend
-
-            echo "==> Cleaning up old images..."
-            docker image prune -f
-
-            echo "==> Deploy complete."
-          REMOTE
+          echo "Deployment failed - rolling back"
+          docker compose down
+          exit 1
