@@ -1,0 +1,6 @@
+.env
+*.jar
+node_modules
+*.bfg-report
+.git
+__pycache__
