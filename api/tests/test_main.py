@@ -14,7 +14,7 @@ def mock_redis_class():
 @pytest.fixture(scope="module")
 def client(mock_redis_class):
     # Import here so the patch is already active
-    from api.main import app
+    from main import app
     return TestClient(app)
 
 
