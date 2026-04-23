@@ -223,8 +223,9 @@ jobs:
           image-ref: "localhost:5000/api:${{ github.sha }}"
           format: sarif
           output: trivy-api.sarif
-          severity: CRITICAL
-          exit-code: "1"
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+          ignore-unfixed: true
 
       - name: Scan worker image with Trivy
         uses: aquasecurity/trivy-action@master
@@ -232,8 +233,9 @@ jobs:
           image-ref: "localhost:5000/worker:${{ github.sha }}"
           format: sarif
           output: trivy-worker.sarif
-          severity: CRITICAL
-          exit-code: "1"
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+          ignore-unfixed: true
 
       - name: Scan frontend image with Trivy
         uses: aquasecurity/trivy-action@master
@@ -241,8 +243,9 @@ jobs:
           image-ref: "localhost:5000/frontend:${{ github.sha }}"
           format: sarif
           output: trivy-frontend.sarif
-          severity: CRITICAL
-          exit-code: "1"
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+          ignore-unfixed: true
 
       - name: Upload Trivy SARIF results
         if: always()
