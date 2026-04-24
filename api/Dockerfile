@@ -15,7 +15,11 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+# Upgrade all OS packages to pick up latest security patches
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create a non-root user
 RUN useradd --no-create-home --shell /bin/false --uid 1001 appuser

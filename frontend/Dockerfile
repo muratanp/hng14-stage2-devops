@@ -11,6 +11,9 @@ RUN npm ci --omit=dev
 # Lean production image
 FROM node:22-alpine
 
+# Upgrade all apk packages
+RUN apk update && apk upgrade --no-cache
+
 WORKDIR /app
 
 # Create a non-root user
