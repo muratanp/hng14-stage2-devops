@@ -88,14 +88,6 @@ jobs:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STAGE 3 — BUILD
-# Builds all three images and pushes them to a local ephemeral registry
-# running as a service container inside this job. Images are saved as
-# tarballs and passed to later stages via GitHub artifacts.
-# No external registry. No cloud account needed.
-#
-# FIX 1: Removed top-level env: block (had GHCR reference)
-# FIX 2: Removed GHCR login and push steps
-# FIX 3: Removed packages: write permission (only needed for GHCR)
 # ─────────────────────────────────────────────────────────────────────────────
   build:
     name: Build
@@ -164,14 +156,24 @@ jobs:
 # ─────────────────────────────────────────────────────────────────────────────
 # STAGE 4 — SECURITY SCAN
 #
-# FIX 4: Changed image-ref: localhost:5000/... to input: <tarfile>
-#         The local registry service only exists in the build job. By the time
-#         this job runs that registry is gone — localhost:5000 resolves to
-#         nothing. Using input: scans the tar file directly, no registry needed.
+# WHY exit-code: "0" on each scan step
+# ──────────────────────────────────────
+# When exit-code is "1" and Trivy finds a CRITICAL CVE, the step exits
+# immediately with a failure. GitHub Actions then skips every subsequent
+# step in the job — so the worker and frontend scans never run and their
+# SARIF files are never written. The upload steps then fail with
+# "Path does not exist" because the files simply were not created.
 #
-# FIX 5: Pinned trivy-action to @0.20.0 instead of @master
+# Fix: set exit-code: "0" on every scan so all three always complete and
+# write their SARIF files regardless of what they find. A dedicated gate
+# step at the end reads the SARIF files and fails the pipeline if any
+# CRITICAL findings are present. This satisfies the requirement while
+# guaranteeing all three files exist before any upload is attempted.
 #
-# FIX 9: Changed upload-sarif from @v4 (does not exist) to @v3
+# WHY @0.29.0
+# ────────────
+# v0.20.0 had inconsistent output path handling when scanning tar files
+# via input:. v0.29.0 resolves this correctly.
 # ─────────────────────────────────────────────────────────────────────────────
   security:
     name: Security Scan
@@ -187,36 +189,39 @@ jobs:
         with:
           name: docker-images
 
+      # exit-code: "0" — scan always completes and writes the SARIF file.
+      # The gate step below is what actually fails the pipeline on findings.
       - name: Scan API image
-        uses: aquasecurity/trivy-action@v0.24.0
+        uses: aquasecurity/trivy-action@0.29.0
         with:
           input: api.tar
           format: sarif
           output: trivy-api.sarif
           severity: CRITICAL
-          exit-code: "1"
+          exit-code: "0"
           ignore-unfixed: true
 
       - name: Scan worker image
-        uses: aquasecurity/trivy-action@v0.24.0
+        uses: aquasecurity/trivy-action@0.29.0
         with:
           input: worker.tar
           format: sarif
           output: trivy-worker.sarif
           severity: CRITICAL
-          exit-code: "1"
+          exit-code: "0"
           ignore-unfixed: true
 
       - name: Scan frontend image
-        uses: aquasecurity/trivy-action@v0.24.0
+        uses: aquasecurity/trivy-action@0.29.0
         with:
           input: frontend.tar
           format: sarif
           output: trivy-frontend.sarif
           severity: CRITICAL
-          exit-code: "1"
+          exit-code: "0"
           ignore-unfixed: true
 
+      # All three SARIF files exist at this point — upload them all
       - name: Upload API SARIF results
         if: always()
         uses: github/codeql-action/upload-sarif@v3
@@ -238,13 +243,30 @@ jobs:
           sarif_file: trivy-frontend.sarif
           category: trivy-frontend
 
+      # Gate step — reads each SARIF file and fails the pipeline if any
+      # CRITICAL findings exist. CRITICAL maps to level "error" in SARIF.
+      # This runs AFTER all uploads so the Security tab always has results.
+      - name: Fail pipeline on CRITICAL findings
+        run: |
+          FAILED=false
+          for sarif in trivy-api.sarif trivy-worker.sarif trivy-frontend.sarif; do
+            COUNT=$(jq \
+              '[.runs[].results[] | select(.level == "error")] | length' \
+              "$sarif")
+            if [ "$COUNT" -gt 0 ]; then
+              echo "CRITICAL findings in $sarif: $COUNT"
+              FAILED=true
+            else
+              echo "No CRITICAL findings in $sarif"
+            fi
+          done
+          if [ "$FAILED" = "true" ]; then
+            echo "Pipeline blocked — CRITICAL vulnerabilities must be resolved"
+            exit 1
+          fi
+
 # ─────────────────────────────────────────────────────────────────────────────
 # STAGE 5 — INTEGRATION TEST
-#
-# FIX 8: Removed the useless "Export env safely" step.
-#         export $(cat .env | xargs) only affects the shell it runs in —
-#         that shell exits immediately after the step. It had zero effect.
-#         docker compose --env-file .env already handles this correctly.
 # ─────────────────────────────────────────────────────────────────────────────
   integration:
     name: Integration Test
@@ -324,7 +346,7 @@ jobs:
           echo "Job ID: $JOB_ID"
           echo "job_id=$JOB_ID" >> "$GITHUB_OUTPUT"
 
-      - name: Poll until job completes (max 30s)
+      - name: Poll until job completes (max 45s)
         run: |
           JOB_ID="${{ steps.submit.outputs.job_id }}"
           echo "Polling job $JOB_ID..."
@@ -348,19 +370,7 @@ jobs:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STAGE 6 — DEPLOY  (main branch only)
-#
-# FIX 6 + 7: Completely rewritten. No cloud. No SSH. No secrets.
-#             No external registry. Runs entirely on the GitHub Actions runner.
-#
-# Strategy:
-#   1. Load tarballs and tag images as :current and :new
-#   2. Start the "current" stack on port 3000 — this is the old running version
-#   3. Roll each service one at a time:
-#        a. Start a new container from the :new image on the same network
-#        b. Wait up to 60s for its HEALTHCHECK to pass
-#        c. Healthy   → stop and remove the old container (clean swap)
-#        d. Unhealthy → stop the new container, leave old running, exit 1
-#   4. Smoke test the new stack end-to-end on port 3001
+# No cloud. No SSH. No secrets. Runs entirely on the GitHub Actions runner.
 # ─────────────────────────────────────────────────────────────────────────────
   deploy:
     name: Deploy
@@ -376,9 +386,6 @@ jobs:
         with:
           name: docker-images
 
-      # Tag each image as both :current (old version) and :new (new version).
-      # Both point at the same build in this simulation, which correctly
-      # proves the rolling update machinery works end-to-end.
       - name: Load and tag images
         run: |
           docker load -i api.tar
@@ -389,7 +396,6 @@ jobs:
             docker tag localhost:5000/${svc}:${{ github.sha }} local/${svc}:new
           done
 
-      # Start the "current" (old) stack — represents what is already running
       - name: Start current stack
         run: |
           cat > .env << 'EOF'
@@ -415,7 +421,6 @@ jobs:
             sleep 5
           done
 
-      # Capture the IDs of the currently running containers before we touch them
       - name: Record old container IDs
         id: old
         run: |
@@ -423,7 +428,6 @@ jobs:
           echo "worker=$(docker compose ps -q worker)"     >> "$GITHUB_OUTPUT"
           echo "frontend=$(docker compose ps -q frontend)" >> "$GITHUB_OUTPUT"
 
-      # Rolling update — one service at a time
       - name: Rolling update
         env:
           OLD_API:      ${{ steps.old.outputs.api }}
@@ -434,12 +438,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Find the internal Docker network all services share
           NETWORK=$(docker inspect "$OLD_API" \
             --format='{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}')
           echo "Using network: $NETWORK"
 
-          # ── helper: wait for a container to become healthy or timeout ────
           wait_healthy() {
             local cid="$1"
             local name="$2"
@@ -460,8 +462,7 @@ jobs:
             done
           }
 
-          # ── 1. Roll the API ──────────────────────────────────────────────
-          echo ""
+          # ── 1. Roll API ──────────────────────────────────────────────────
           echo "==> Rolling api..."
           NEW_API=$(docker run -d \
             --name api_new \
@@ -477,17 +478,14 @@ jobs:
             local/api:new)
 
           if wait_healthy "$NEW_API" "api_new"; then
-            echo "  api_new is healthy — removing old api"
             docker stop "$OLD_API" && docker rm "$OLD_API"
             echo "  api rolled successfully"
           else
-            echo "  api_new unhealthy — aborting, old api stays running"
             docker stop api_new && docker rm api_new
             exit 1
           fi
 
-          # ── 2. Roll the worker ───────────────────────────────────────────
-          echo ""
+          # ── 2. Roll worker ───────────────────────────────────────────────
           echo "==> Rolling worker..."
           NEW_WORKER=$(docker run -d \
             --name worker_new \
@@ -503,19 +501,15 @@ jobs:
             local/worker:new)
 
           if wait_healthy "$NEW_WORKER" "worker_new"; then
-            echo "  worker_new is healthy — removing old worker"
             docker stop "$OLD_WORKER" && docker rm "$OLD_WORKER"
             echo "  worker rolled successfully"
           else
-            echo "  worker_new unhealthy — aborting, old worker stays running"
             docker stop worker_new && docker rm worker_new
             exit 1
           fi
 
-          # ── 3. Roll the frontend ─────────────────────────────────────────
-          # New frontend binds to port 3001 so old frontend stays on 3000
-          # until the health check confirms the new one is ready
-          echo ""
+          # ── 3. Roll frontend ─────────────────────────────────────────────
+          # Binds to port 3001 so old frontend keeps 3000 until health passes
           echo "==> Rolling frontend..."
           NEW_FRONT=$(docker run -d \
             --name frontend_new \
@@ -531,19 +525,15 @@ jobs:
             local/frontend:new)
 
           if wait_healthy "$NEW_FRONT" "frontend_new"; then
-            echo "  frontend_new is healthy — removing old frontend"
             docker stop "$OLD_FRONTEND" && docker rm "$OLD_FRONTEND"
             echo "  frontend rolled successfully"
           else
-            echo "  frontend_new unhealthy — aborting, old frontend stays running"
             docker stop frontend_new && docker rm frontend_new
             exit 1
           fi
 
-          echo ""
           echo "==> All three services rolled successfully."
 
-      # Smoke test: verify the new stack actually processes a job end-to-end
       - name: Smoke test new stack
         run: |
           echo "Submitting a job to the new stack (port 3001)..."
@@ -551,7 +541,6 @@ jobs:
             -H "Content-Type: application/json" | \
             python3 -c "import sys,json; print(json.load(sys.stdin)['job_id'])")
           echo "Job ID: $JOB_ID"
-
           for i in $(seq 1 15); do
             STATUS=$(curl -sf "http://localhost:3001/status/$JOB_ID" | \
               python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")
@@ -562,13 +551,11 @@ jobs:
             fi
             sleep 2
           done
-
           echo "ERROR: smoke test failed after rolling update"
           docker logs api_new
           docker logs worker_new
           exit 1
 
-      # Always clean up — even if any step above failed
       - name: Tear down (always runs)
         if: always()
         run: |
