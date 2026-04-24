@@ -1,6 +1,5 @@
-# syntax=docker/dockerfile:1
-# ── Stage 1: Install dependencies ─────────────────────────────────────────
-FROM python:3.11-slim AS builder
+# Stage 1: Install dependencies
+FROM python:3.12-slim AS builder
 
 WORKDIR /build
 
@@ -10,8 +9,8 @@ RUN pip install --no-cache-dir --user --upgrade pip==23.3.1 \
     && pip install --no-cache-dir --user -r requirements.txt
 
 
-# ── Stage 2: Lean production image ────────────────────────────────────────
-FROM python:3.11-slim
+# Stage 2: Lean production image
+FROM python:3.12-slim
 
 WORKDIR /app
 

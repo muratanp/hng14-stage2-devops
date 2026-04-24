@@ -1,5 +1,5 @@
 # Install production dependencies
-FROM node:18-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /build
 
@@ -9,7 +9,7 @@ RUN npm ci --omit=dev
 
 
 # Lean production image
-FROM node:18-alpine
+FROM node:22-alpine
 
 WORKDIR /app
 
