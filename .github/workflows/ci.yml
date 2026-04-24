@@ -206,9 +206,9 @@ jobs:
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: image
-          input: api.tar
+          input: worker.tar
           format: sarif
-          output: trivy-api.sarif
+          output: trivy-worker.sarif
           severity: CRITICAL
           exit-code: "0"
           ignore-unfixed: true
@@ -217,9 +217,9 @@ jobs:
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: image
-          input: api.tar
+          input: frontend.tar
           format: sarif
-          output: trivy-api.sarif
+          output: trivy-frontend.sarif
           severity: CRITICAL
           exit-code: "0"
           ignore-unfixed: true
