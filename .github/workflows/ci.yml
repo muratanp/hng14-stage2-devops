@@ -188,7 +188,7 @@ jobs:
           name: docker-images
 
       - name: Scan API image
-        uses: aquasecurity/trivy-action@0.20.0
+        uses: aquasecurity/trivy-action@v0.24.0
         with:
           input: api.tar
           format: sarif
@@ -198,7 +198,7 @@ jobs:
           ignore-unfixed: true
 
       - name: Scan worker image
-        uses: aquasecurity/trivy-action@0.20.0
+        uses: aquasecurity/trivy-action@v0.24.0
         with:
           input: worker.tar
           format: sarif
@@ -208,7 +208,7 @@ jobs:
           ignore-unfixed: true
 
       - name: Scan frontend image
-        uses: aquasecurity/trivy-action@0.20.0
+        uses: aquasecurity/trivy-action@v0.24.0
         with:
           input: frontend.tar
           format: sarif
