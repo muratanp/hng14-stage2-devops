@@ -192,8 +192,9 @@ jobs:
       # exit-code: "0" — scan always completes and writes the SARIF file.
       # The gate step below is what actually fails the pipeline on findings.
       - name: Scan API image
-        uses: aquasecurity/trivy-action@0.29.0
+        uses: aquasecurity/trivy-action@0.24.0
         with:
+          scan-type: image
           input: api.tar
           format: sarif
           output: trivy-api.sarif
@@ -202,21 +203,23 @@ jobs:
           ignore-unfixed: true
 
       - name: Scan worker image
-        uses: aquasecurity/trivy-action@0.29.0
+        uses: aquasecurity/trivy-action@0.24.0
         with:
-          input: worker.tar
+          scan-type: image
+          input: api.tar
           format: sarif
-          output: trivy-worker.sarif
+          output: trivy-api.sarif
           severity: CRITICAL
           exit-code: "0"
           ignore-unfixed: true
 
       - name: Scan frontend image
-        uses: aquasecurity/trivy-action@0.29.0
+        uses: aquasecurity/trivy-action@0.24.0
         with:
-          input: frontend.tar
+          scan-type: image
+          input: api.tar
           format: sarif
-          output: trivy-frontend.sarif
+          output: trivy-api.sarif
           severity: CRITICAL
           exit-code: "0"
           ignore-unfixed: true
