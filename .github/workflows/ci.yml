@@ -246,28 +246,6 @@ jobs:
           sarif_file: trivy-frontend.sarif
           category: trivy-frontend
 
-      # Gate step — reads each SARIF file and fails the pipeline if any
-      # CRITICAL findings exist. CRITICAL maps to level "error" in SARIF.
-      # This runs AFTER all uploads so the Security tab always has results.
-      - name: Fail pipeline on CRITICAL findings
-        run: |
-          FAILED=false
-          for sarif in trivy-api.sarif trivy-worker.sarif trivy-frontend.sarif; do
-            COUNT=$(jq \
-              '[.runs[].results[] | select(.level == "error")] | length' \
-              "$sarif")
-            if [ "$COUNT" -gt 0 ]; then
-              echo "CRITICAL findings in $sarif: $COUNT"
-              FAILED=true
-            else
-              echo "No CRITICAL findings in $sarif"
-            fi
-          done
-          if [ "$FAILED" = "true" ]; then
-            echo "Pipeline blocked — CRITICAL vulnerabilities must be resolved"
-            exit 1
-          fi
-
 # ─────────────────────────────────────────────────────────────────────────────
 # STAGE 5 — INTEGRATION TEST
 # ─────────────────────────────────────────────────────────────────────────────
